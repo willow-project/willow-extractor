@@ -4,6 +4,7 @@
 
 use crate::Item;
 use scraper::{Html, Selector};
+use std::collections::HashMap;
 
 /// Extract metadata from HTML content
 pub fn extract_html(html: &str) -> Vec<Item> {
@@ -67,22 +68,22 @@ fn parse_jsonld_value(data: &serde_json::Value) -> Option<Item> {
 }
 
 fn parse_jsonld_object(obj: &serde_json::Value) -> Option<Item> {
-    let type_val = obj.get("@type")?;
-    let item_type = match type_val {
-        serde_json::Value::String(s) => s.as_str(),
-        serde_json::Value::Array(arr) => arr.first()?.as_str()?,
-        _ => return None,
-    };
+    let type_val = obj.get("@type");
+    let item_type = type_val.and_then(|t| match t {
+        serde_json::Value::String(s) => Some(s.as_str()),
+        serde_json::Value::Array(arr) => arr.first().and_then(|v| v.as_str()),
+        _ => None,
+    });
 
-    // Only process relevant types
-    let normalized_type = match item_type {
+    // Normalize type
+    let normalized_type = item_type.map(|t| match t {
         "Article" | "NewsArticle" | "ScholarlyArticle" | "TechArticle" => "journalArticle",
         "Book" => "book",
         "WebPage" | "WebSite" => "webpage",
         "VideoObject" => "video",
         "BlogPosting" => "blogPost",
-        _ => return None,
-    };
+        other => other,
+    }.to_string());
 
     let title = obj
         .get("headline")
@@ -95,6 +96,7 @@ fn parse_jsonld_object(obj: &serde_json::Value) -> Option<Item> {
     let date = obj
         .get("datePublished")
         .or_else(|| obj.get("dateCreated"))
+        .or_else(|| obj.get("uploadDate"))
         .and_then(|v| v.as_str())
         .map(|s| s.chars().take(10).collect());
 
@@ -111,6 +113,24 @@ fn parse_jsonld_object(obj: &serde_json::Value) -> Option<Item> {
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    // Collect extra fields
+    let mut fields = HashMap::new();
+    let skip_keys = ["@context", "@type", "headline", "name", "author", "datePublished",
+                     "dateCreated", "uploadDate", "url", "description", "publisher"];
+
+    if let Some(map) = obj.as_object() {
+        for (key, value) in map {
+            if skip_keys.contains(&key.as_str()) {
+                continue;
+            }
+            if let Some(s) = value_to_string(value) {
+                if !s.is_empty() {
+                    fields.insert(key.clone(), s);
+                }
+            }
+        }
+    }
+
     if title.is_none() && authors.is_empty() {
         return None;
     }
@@ -122,10 +142,38 @@ fn parse_jsonld_object(obj: &serde_json::Value) -> Option<Item> {
         url,
         publisher,
         description,
-        item_type: Some(normalized_type.to_string()),
+        item_type: normalized_type,
         source: Some("jsonld".to_string()),
+        fields,
         ..Default::default()
     })
+}
+
+fn value_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Object(obj) => {
+            // Try to get name or @id from nested objects
+            obj.get("name")
+                .or_else(|| obj.get("@id"))
+                .or_else(|| obj.get("url"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter()
+                .filter_map(value_to_string)
+                .collect();
+            if items.is_empty() {
+                None
+            } else {
+                Some(items.join(", "))
+            }
+        }
+        _ => None,
+    }
 }
 
 fn extract_jsonld_authors(obj: &serde_json::Value) -> Vec<String> {

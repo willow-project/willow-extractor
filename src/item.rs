@@ -1,6 +1,7 @@
 //! Bibliographic item type
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A bibliographic item
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -16,6 +17,9 @@ pub struct Item {
     pub item_type: Option<String>,
     /// Where the metadata came from (e.g., "crossref", "openlibrary", "html")
     pub source: Option<String>,
+    /// Additional fields that don't fit the standard schema
+    #[serde(default)]
+    pub fields: HashMap<String, String>,
 }
 
 impl Item {
