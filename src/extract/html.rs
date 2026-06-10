@@ -202,12 +202,18 @@ fn extract_dublincore(doc: &Html) -> Option<Item> {
 fn extract_opengraph(doc: &Html) -> Option<Item> {
     let title = get_meta(doc, "og:title")?;
 
-    let item_type = get_meta(doc, "og:type").map(|t| match t.as_str() {
-        "article" => "journalArticle",
-        "book" => "book",
-        "video.movie" | "video.episode" => "video",
-        _ => "webpage",
-    }.to_string());
+    let item_type = get_meta(doc, "og:type").map(|t| {
+        if t.starts_with("video") {
+            "video"
+        } else {
+            match t.as_str() {
+                "article" => "journalArticle",
+                "book" => "book",
+                "music.song" | "music.album" => "audio",
+                _ => "webpage",
+            }
+        }.to_string()
+    });
 
     let description = get_meta(doc, "og:description");
     let url = get_meta(doc, "og:url");
