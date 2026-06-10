@@ -97,6 +97,15 @@ pub async fn extract_html(
 ) -> Result<Vec<Item>, ExtractError> {
     let mut items = extract::extract_html(html);
 
+    // Set source URL on items that don't have one
+    if let Some(url) = source_url {
+        for item in &mut items {
+            if item.url.is_none() {
+                item.url = Some(url.to_string());
+            }
+        }
+    }
+
     // If sparse, try to resolve identifiers
     let has_good_metadata = items
         .iter()
@@ -112,7 +121,10 @@ pub async fn extract_html(
             }
         }
 
-        if let Some(resolved) = fetch::resolve_any(&identifiers, config).await {
+        if let Some(mut resolved) = fetch::resolve_any(&identifiers, config).await {
+            if resolved.url.is_none() {
+                resolved.url = source_url.map(String::from);
+            }
             items.push(resolved);
         }
     }
